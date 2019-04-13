@@ -4,11 +4,14 @@ import (
 	// "log"
 	"strings"
 	"io/ioutil"
-	//"net/http"
+	"net/http"
+	"net/url"
+	"time"
 )
 const (
 	filmFileName = "films.txt"
 	passedFileName = "passed.txt"
+	proxy = "http://54.37.84.141:3128"
 )
 type film struct {
 	name string
@@ -25,7 +28,7 @@ func getFilmNamesFromFile(filename string) ([]film, error) {
 	
 	for _, name := range films {
 		tempFilm = strings.Split(name, ";")
-		result = append(result, film {tempFilm[0], "1"})
+		result = append(result, film {name: tempFilm[0], show: tempFilm[1]})
 	}
 	return result, nil
 }
@@ -37,16 +40,38 @@ func setFilmNamesToFile(films []film, filename string) {
 	buffer := []byte(strings.Join(tempFilm, "\r\n"))
 	ioutil.WriteFile(filename, buffer, 0666)
 }
+func worker
 
-// func getSiteBody(url, proxy string) ([]byte, error) {
-// 	//
-// }
-// func parseSite(body []byte, film string) bool {
-// 	//
-//}
+
+
+func getSiteBody(address string) ([]byte, error) {
+	proxyURL, err := url.Parse(proxy)
+	if err != nil {
+		return nil, err
+	}
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	client := &http.Client{Transport: transport, Timeout: time.Second * 5}
+	request, err := http.NewRequest("GET", address, nil)
+    if err != nil {
+        return nil, err
+    }
+    response, err := client.Do(request)
+    if err != nil {
+        return nil, err
+    }
+    data, err := ioutil.ReadAll(response.Body)
+    if err != nil {
+        return nil, err
+	}
+	return data, nil
+}
+func parseSite(body []byte, film string) bool {
+	
+	return true
+}
 
 func main() {
 	films, _ := getFilmNamesFromFile(filmFileName)
-	
+
 	setFilmNamesToFile(films, filmFileName)
 }
