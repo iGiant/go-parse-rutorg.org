@@ -1,9 +1,8 @@
 package main
 
 import (
-	"log"
+	// "log"
 	"strings"
-	"strconv"
 	"io/ioutil"
 	//"net/http"
 )
@@ -13,9 +12,9 @@ const (
 )
 type film struct {
 	name string
-	show int
+	show string
 }
-func getFilmNames(filename string) ([]film, error) {
+func getFilmNamesFromFile(filename string) ([]film, error) {
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return nil, err
@@ -26,13 +25,17 @@ func getFilmNames(filename string) ([]film, error) {
 	
 	for _, name := range films {
 		tempFilm = strings.Split(name, ";")
-		show, err := strconv.Atoi(tempFilm[1])
-		if err != nil {
-			show = 1
-		}
-		result = append(result, film {tempFilm[0], show})
+		result = append(result, film {tempFilm[0], "1"})
 	}
 	return result, nil
+}
+func setFilmNamesToFile(films []film, filename string) {
+	tempFilm := make([]string, 0)
+	for _, kino := range films {
+		tempFilm = append(tempFilm, kino.name + ";" + kino.show)
+	}
+	buffer := []byte(strings.Join(tempFilm, "\r\n"))
+	ioutil.WriteFile(filename, buffer, 0666)
 }
 
 // func getSiteBody(url, proxy string) ([]byte, error) {
@@ -43,8 +46,7 @@ func getFilmNames(filename string) ([]film, error) {
 //}
 
 func main() {
-	films, _ := getFilmNames("films.txt")
-	for _, kino := range films {
-		log.Printf("Фильм: %s, показывать %b\n", kino.name, bool(kino.show))
-	}
+	films, _ := getFilmNamesFromFile(filmFileName)
+	
+	setFilmNamesToFile(films, filmFileName)
 }
