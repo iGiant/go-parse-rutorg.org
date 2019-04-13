@@ -40,8 +40,9 @@ func setFilmNamesToFile(films []film, filename string) {
 	buffer := []byte(strings.Join(tempFilm, "\r\n"))
 	ioutil.WriteFile(filename, buffer, 0666)
 }
-func worker
-
+func worker(name string) {
+	//
+}
 
 
 func getSiteBody(address string) ([]byte, error) {
