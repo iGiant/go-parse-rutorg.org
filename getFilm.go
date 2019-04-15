@@ -2,19 +2,19 @@ package main
 
 import (
 	"log"
-	"os"
 	"strings"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"time"
+	"sync"
 	"github.com/PuerkitoBio/goquery"
-	_ "my.libs/slkclient"
+	"my.libs/slkclient"
 )
 const (
 	filmFileName = "films.txt"
 	passedFileName = "passed.txt"
-	proxy = "http://210.0.128.58:8080"
+	proxy = "http://54.37.84.141:3128"
 	address = "http://rutor.info"
 	search = "/search/0/0/100/0/"
 )
@@ -22,7 +22,7 @@ type movie struct {
 	name string
 	show string
 }
-func getAlreadyLoadFilms(filename string) []string {
+func loadAlreadyLoadFilms(filename string) []string {
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return make([]string, 0)
@@ -30,7 +30,7 @@ func getAlreadyLoadFilms(filename string) []string {
 	return strings.Split(string(content), "\r\n")
 }
 
-func getFilmNamesFromFile(filename string) ([]movie, error) {
+func loadFilmNamesFromFile(filename string) ([]movie, error) {
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return nil, err
@@ -45,7 +45,7 @@ func getFilmNamesFromFile(filename string) ([]movie, error) {
 	}
 	return result, nil
 }
-func setFilmNamesToFile(films []movie, filename string) {
+func saveFilmNamesToFile(films []movie, filename string) {
 	tempFilm := make([]string, 0)
 	for _, film := range films {
 		tempFilm = append(tempFilm, film.name + ";" + film.show)
@@ -53,11 +53,12 @@ func setFilmNamesToFile(films []movie, filename string) {
 	buffer := []byte(strings.Join(tempFilm, "\r\n"))
 	ioutil.WriteFile(filename, buffer, 0666)
 }
-func worker(name string) {
-	//
+func saveAlreadyFilms(list []string, filename string) {
+	buffer := []byte(strings.Join(list, "\r\n"))
+	ioutil.WriteFile(filename, buffer, 0666)
 }
 
-func verifyIn(pattern string, list []string) bool {
+func verifyAlready(pattern string, list []string) bool {
 	for _, line := range list {
 		if pattern == line {
 			return true
@@ -65,45 +66,96 @@ func verifyIn(pattern string, list []string) bool {
 	}
 	return false
 }
-func parseSite(name string, list []string) (bool, error) {
+func verifyIn (film string, list []string) bool {
+	var flag bool
+	for _, line := range list {
+		flag = true
+		for _, word := range strings.Split(film, " ") {
+			if !strings.Contains(strings.ToLower(line), strings.ToLower(word)) {
+				flag = false
+				break
+			}
+		}
+		if flag {
+			if strings.Contains(strings.ToLower(line), "лицензия") ||  strings.Contains(strings.ToLower(line), "itunes") {}
+			return true
+		}
+	}
+	return false
+}
+func addAlreadyFilms(count int, list *[]string, c chan []byte, wg *sync.WaitGroup) {
+	wg.Add(1)
+	var msg string
+	defer wg.Done()
+	for {
+		msg = string(<-c)
+		if msg == "" {
+			count--
+			if count == 0 {
+				return
+			} else {
+				*list = append(*list, msg)
+			}
+		}
+	}
+}
+
+func parseSite(film *movie, list []string, c chan []byte) {
+	log.Println("starting " + film.name)
+	defer func() {c <- []byte("")}()
 	proxyURL, err := url.Parse(proxy)
 	if err != nil {
-		return false, err
+		log.Println(err)
 	}
 	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
-	client := &http.Client{Transport: transport, Timeout: time.Second * 10}
-	
-	request, err := http.NewRequest("GET", address + search + url.PathEscape(name), nil)
+	client := &http.Client{Transport: transport, Timeout: time.Second * 20}
+	request, err := http.NewRequest("GET", address + search + url.PathEscape(film.name), nil)
     if err != nil {
-        return false, err
+        log.Println(err)
 	}
-    response, err := client.Do(request)
+	response, err := client.Do(request)
     if err != nil {
-        return false, err
+        log.Println(err)
     }
+	
 	defer response.Body.Close()
-	// log.Println(response.StatusCode)
-	// text, _ := ioutil.ReadAll(response.Body)
-	// log.Println(string(text))
 	doc, err := goquery.NewDocumentFromReader(response.Body)
 	if err != nil {
-		return false, err
+		return
 	}
-	
+	var sendToSlack bool
 	doc.Find("tr.gai td:nth-child(2) a:nth-child(3)").Each(func(i int, s *goquery.Selection) {
 		// For each item found, get the band and title
 		item := s.Text()
-		log.Println(item)
+		if !verifyAlready(item, list) {
+			c <- []byte(item)
+			if verifyIn(film.name, list) {
+				sendToSlack = true
+				film.show = "0"
+			}
+		}
 	})
-	return true, nil
+	if sendToSlack {
+		err := slkclient.SendToSlack(":movie_camera: Фильм", "Появился фильм: " + film.name, "", "", "")
+		if err != nil {
+			return
+		}
+	}
 }
 
 func main() {
-	c := make(chan []string, 0)
-	films, _ := getFilmNamesFromFile(filmFileName)
-	list := getAlreadyLoadFilms(passedFileName)
-	for _, 
-	_, err := parseSite("Стекло", list)
-	log.Println(err)
-	setFilmNamesToFile(films, filmFileName)
+	newFilms := make(chan []byte, 0)
+	var wg sync.WaitGroup
+	films, _ := loadFilmNamesFromFile(filmFileName)
+	listAlready := loadAlreadyLoadFilms(passedFileName)
+	go addAlreadyFilms(len(films), &listAlready, newFilms, &wg)
+	for i := range films {
+		if films[i].show != "0" {
+			log.Println("launch " + films[i].name)
+			go parseSite(&films[i], listAlready, newFilms)
+		}
+	}
+	wg.Wait()
+	saveAlreadyFilms(listAlready, passedFileName)
+	saveFilmNamesToFile(films, filmFileName)
 }
