@@ -124,6 +124,7 @@ func parseSite(film *movie, list []string, c chan<- string) {
     if err != nil {
         return
 	}
+	request.Header.Set("User-Agent", ua)
 	response, err := client.Do(request)
 	if err != nil {
         return
@@ -159,9 +160,10 @@ func main() {
 	}
 	listAlready := loadAlreadyLoadFilms(passedFileName)
 	index := 0
+	client := &http.Client{Timeout: time.Second * 5}
 	for i := range films {
 		if films[i].show != "0" {
-			go parseSite(&films[i], listAlready, newFilms)
+			go parseSite(client, &films[i], listAlready, newFilms)
 			index++
 		}
 	}
