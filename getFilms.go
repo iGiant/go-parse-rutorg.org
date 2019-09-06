@@ -28,12 +28,12 @@ type movie struct {
 var wg sync.WaitGroup
 
 // loadAlreadyLoadFilms загружает данные из 'filename' о ранее найденных фильмах для их игнорирования
-func loadAlreadyLoadFilms(filename string) []string {
+func loadAlreadyLoadedFilms(filename string) []string {
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return make([]string, 0)
 	}
-	return strings.Split(string(content), "\r\n")
+	return strings.Split(strings.ReplaceAll(string(content), "\r\n", "\n"), "\n")
 }
 
 // loadFilmNamesFromFile загружает данные из файла 'filename'
@@ -44,7 +44,7 @@ func loadFilmNamesFromFile(filename string) ([]movie, error) {
 	}
 	result := make([]movie, 0)
 	var tempFilm []string
-	films := strings.Split(string(content), "\r\n")
+	films := strings.Split(strings.ReplaceAll(string(content), "\r\n", "\n"), "\n")
 	for _, film := range films {
 		tempFilm = strings.Split(film, ";")
 		result = append(result, movie {name: tempFilm[0], show: tempFilm[1]})
@@ -77,13 +77,26 @@ func verifyAlready(film string, list []string) bool {
 	return false
 }
 
-// verifyIn проверяет, соответствует ли найденных фильм 'line' критериям поиска 'film', заданным нами
-func verifyIn (film string, line string) bool {
-	flag:= true
-	for _, word := range strings.Split(film, " ") {
-		if !strings.Contains(strings.ToLower(line), strings.ToLower(word)) {
-			flag = false
-			break
+func verifyAlternative(w, line string) bool {
+	for _, alternative := range strings.Fields(w) {
+		if strings.Contains(strings.ToLower(line), strings.ToLower(alternative)) {
+			return true
+		}
+	}
+	return false
+}
+
+// verifyIn проверяет, соответствует ли найденный фильм 'line' критериям поиска 'film', заданным нами
+func verifyIn(film string, line string) bool {
+	for _, word := range strings.Fields(film) {
+		if strings.Contains(word, "|") {
+			if !verifyAlternative(word, line) {
+				return false
+			}
+		} else {
+			if !strings.Contains(strings.ToLower(line), strings.ToLower(word)) {
+				return false
+			}
 		}
 	}
 	if flag {
@@ -109,6 +122,7 @@ func addAlreadyFilms(count int, list []string, c <-chan string) {
 			list = append(list, msg)
 		}
 	}
+
 	if len(list) > startLen {
 		saveAlreadyFilms(list, passedFileName)
 	}
@@ -135,17 +149,25 @@ func parseSite(film *movie, list []string, c chan<- string) {
 		return
 	}
 	sendToSlack := false
+	foundFilm := ""
 	doc.Find("tr.gai td:nth-child(2) a:nth-child(3)").Each(func(i int, s *goquery.Selection) {
 		// For each item found, get the band and title
 		item := strings.TrimSpace(s.Text())
-		if !verifyAlready(item, list) && verifyIn(film.name, item) {
-			c <- item
-			sendToSlack = true
-			film.show = "0"
+		if strings.HasSuffix(strings.ToLower(item), "лицензия") ||
+			strings.HasSuffix(strings.ToLower(item), "itunes") {
+			if !verifyAlready(item, list) && verifyIn(film.name, item) {
+				c <- item
+				if !sendToSlack {
+					foundFilm = strings.TrimSpace(strings.Split(item, "|")[0])
+				}
+				sendToSlack = true
+				film.show = "0"
+			}
 		}
 	})
 	if sendToSlack {
-		err := slkclient.SendToSlack(":cinema: Фильм", "Появился фильм: \"" + film.name + "\"", "", "", "")
+		err := slkclient.SendToSlack(":cinema: Фильм", "Появился фильм: *\""+film.name+"\"*\n("+
+			foundFilm+")", "", "", "")
 		if err != nil {
 			return
 		}
@@ -154,11 +176,14 @@ func parseSite(film *movie, list []string, c chan<- string) {
 
 func main() {
 	newFilms := make(chan string)
-	films, err := loadFilmNamesFromFile(filmFileName)
+	films, err := getFilms()
 	if err != nil {
-		panic(err)
+		films, err = loadFilmNamesFromFile(filmFileName)
+		if err != nil {
+			os.Exit(1)
+		}
 	}
-	listAlready := loadAlreadyLoadFilms(passedFileName)
+	listAlready := loadAlreadyLoadedFilms(passedFileName)
 	index := 0
 	client := &http.Client{Timeout: time.Second * 5}
 	for i := range films {
@@ -174,3 +199,5 @@ func main() {
 	}
 	saveFilmNamesToFile(films, filmFileName)
 }
+
+// go build -ldflags "-H windowsgui"
